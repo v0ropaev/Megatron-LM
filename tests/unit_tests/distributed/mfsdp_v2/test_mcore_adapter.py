@@ -66,7 +66,7 @@ def _destroy_model_parallel():
 
 
 @pytest.fixture
-def dense_model_parallel(distributed_setup):
+def dense_process_group_collection(distributed_setup):
     """Set up dense model parallelism and clean up its process groups afterward."""
     Utils.initialize_model_parallel(1, 1)
     pg_collection = ProcessGroupCollection.use_mpu_process_groups()
@@ -75,7 +75,7 @@ def dense_model_parallel(distributed_setup):
     _destroy_model_parallel()
 
 
-def test_init_model_with_meta_device_initializes_fsdp_v2_parameters(dense_model_parallel):
+def test_init_model_with_meta_device_initializes_fsdp_v2_parameters(dense_process_group_collection):
     """init_model_with_meta_device should materialize FSDP v2 parameters with configured values."""
 
     def initialize_to_constant(weight):
@@ -111,7 +111,7 @@ def test_init_model_with_meta_device_initializes_fsdp_v2_parameters(dense_model_
         ),
         module=meta_layer,
         fsdp_unit_modules=[TransformerLayer],
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
 
     assert isinstance(wrapped.module, FsdpModule)
@@ -134,7 +134,7 @@ def test_init_model_with_meta_device_initializes_fsdp_v2_parameters(dense_model_
         )
 
 
-def test_wraps_fsdp_unit_modules_before_root(dense_model_parallel):
+def test_wraps_fsdp_unit_modules_before_root(dense_process_group_collection):
     config = TransformerConfig(
         num_layers=1,
         hidden_size=16,
@@ -159,7 +159,7 @@ def test_wraps_fsdp_unit_modules_before_root(dense_model_parallel):
         ),
         module=model,
         fsdp_unit_modules=[TransformerLayer],
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
 
     assert isinstance(wrapped.module, FsdpModule)
@@ -183,7 +183,7 @@ def test_wraps_fsdp_unit_modules_before_root(dense_model_parallel):
     assert root_parameter_names == {"1.weight", "1.bias"}
 
 
-def test_nccl_ub_enables_symmetric_memory(dense_model_parallel, monkeypatch):
+def test_nccl_ub_enables_symmetric_memory(dense_process_group_collection, monkeypatch):
     config = TransformerConfig(
         num_layers=1,
         hidden_size=16,
@@ -212,13 +212,13 @@ def test_nccl_ub_enables_symmetric_memory(dense_model_parallel, monkeypatch):
             nccl_ub=True,
         ),
         module=model,
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
 
     assert fully_shard_context_calls == [True]
 
 
-def test_build_train_and_step(dense_model_parallel):
+def test_build_train_and_step(dense_process_group_collection):
     """Match eager training against an MFSDP v2 train-and-step sequence."""
     config = TransformerConfig(
         num_layers=2,
@@ -246,7 +246,7 @@ def test_build_train_and_step(dense_model_parallel):
             data_parallel_sharding_strategy="optim_grads_params",
         ),
         module=model,
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
 
     reference_optimizer_config = OptimizerConfig(
@@ -306,7 +306,7 @@ def test_build_train_and_step(dense_model_parallel):
     torch.testing.assert_close(losses, reference_losses, rtol=1e-3, atol=0)
 
 
-def test_fused_sgd_casts_mismatched_grads(dense_model_parallel):
+def test_fused_sgd_casts_mismatched_grads(dense_process_group_collection):
     """FusedSGD steps after MCore casts V2's BF16 gradients to FP32."""
     config = TransformerConfig(
         num_layers=1,
@@ -329,7 +329,7 @@ def test_fused_sgd_casts_mismatched_grads(dense_model_parallel):
             megatron_fsdp_main_grads_dtype=torch.bfloat16,
         ),
         module=_build_block(config),
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
     optimizer_config = OptimizerConfig(
         optimizer="sgd",
@@ -354,7 +354,9 @@ def test_fused_sgd_casts_mismatched_grads(dense_model_parallel):
 
 
 @pytest.mark.parametrize("use_precision_aware_optimizer", [False, True])
-def test_gradient_clipping_reaches_global_norm(dense_model_parallel, use_precision_aware_optimizer):
+def test_gradient_clipping_reaches_global_norm(
+    dense_process_group_collection, use_precision_aware_optimizer
+):
     """MFSDP v2 reports the true global gradient norm and clips the gradients to it.
 
     Main gradients are kept in the main-weight dtype so that clipping is measurable on
@@ -383,7 +385,7 @@ def test_gradient_clipping_reaches_global_norm(dense_model_parallel, use_precisi
             megatron_fsdp_main_grads_dtype=torch.float32,
         ),
         module=_build_block(config),
-        pg_collection=dense_model_parallel,
+        pg_collection=dense_process_group_collection,
     )
     optimizer = get_megatron_optimizer(
         OptimizerConfig(
@@ -437,7 +439,7 @@ def test_gradient_clipping_reaches_global_norm(dense_model_parallel, use_precisi
 
 
 @pytest.fixture
-def cuda_graph_model_parallel(distributed_setup):
+def cuda_graph_process_group_collection(distributed_setup):
     """Yield process groups with TE RNG tracking, then reset graph state and groups."""
     Utils.initialize_model_parallel(1, 1)
     pg_collection = ProcessGroupCollection.use_mpu_process_groups()
@@ -455,7 +457,7 @@ def cuda_graph_model_parallel(distributed_setup):
     _destroy_model_parallel()
 
 
-def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_model_parallel):
+def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_process_group_collection):
     """Compare graph replay with an otherwise identical eager MFSDP v2 run."""
     eager_config = TransformerConfig(
         num_layers=2,
@@ -486,7 +488,7 @@ def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_model_pa
                 megatron_fsdp_cuda_graph_mode=enable_cuda_graph,
             ),
             module=model,
-            pg_collection=cuda_graph_model_parallel,
+            pg_collection=cuda_graph_process_group_collection,
         )
         optimizer = get_megatron_optimizer(
             OptimizerConfig(
@@ -575,7 +577,7 @@ def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_model_pa
 
 
 @pytest.fixture
-def expert_model_parallel(distributed_setup):
+def expert_and_reference_process_group_collections(distributed_setup):
     """Yield EP=2 process groups and singleton reference groups, then clean them up."""
     world_size = distributed_setup.world_size
     if world_size < 2 or world_size % 2:
@@ -607,9 +609,11 @@ def expert_model_parallel(distributed_setup):
     _destroy_model_parallel()
 
 
-def test_build_train_step_and_clip(expert_model_parallel, distributed_setup):
+def test_build_train_step_and_clip(
+    expert_and_reference_process_group_collections, distributed_setup
+):
     """Shard experts over expert-DP and clip their combined gradients."""
-    pg_collection, reference_pg_collection = expert_model_parallel
+    pg_collection, reference_pg_collection = expert_and_reference_process_group_collections
     world_size = distributed_setup.world_size
     # The in-process EP=1 reference needs rank-invariant initialization. GPU expert
     # initialization instead uses the globally configured EP=2 rank in its RNG seed.
