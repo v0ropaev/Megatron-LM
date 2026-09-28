@@ -437,7 +437,7 @@ def test_gradient_clipping_reaches_global_norm(dense_model_parallel, use_precisi
 
 
 @pytest.fixture
-def cuda_graph_process_groups(distributed_setup):
+def cuda_graph_model_parallel(distributed_setup):
     """Yield process groups with TE RNG tracking, then reset graph state and groups."""
     Utils.initialize_model_parallel(1, 1)
     pg_collection = ProcessGroupCollection.use_mpu_process_groups()
@@ -455,7 +455,7 @@ def cuda_graph_process_groups(distributed_setup):
     _destroy_model_parallel()
 
 
-def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_process_groups):
+def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_model_parallel):
     """Compare graph replay with an otherwise identical eager MFSDP v2 run."""
     eager_config = TransformerConfig(
         num_layers=2,
@@ -486,7 +486,7 @@ def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_process_
                 megatron_fsdp_cuda_graph_mode=enable_cuda_graph,
             ),
             module=model,
-            pg_collection=cuda_graph_process_groups,
+            pg_collection=cuda_graph_model_parallel,
         )
         optimizer = get_megatron_optimizer(
             OptimizerConfig(
@@ -575,7 +575,7 @@ def test_full_iteration_and_optimizer_cuda_graph_match_eager(cuda_graph_process_
 
 
 @pytest.fixture
-def expert_and_reference_process_groups(distributed_setup):
+def expert_model_parallel(distributed_setup):
     """Yield EP=2 process groups and singleton reference groups, then clean them up."""
     world_size = distributed_setup.world_size
     if world_size < 2 or world_size % 2:
@@ -607,9 +607,9 @@ def expert_and_reference_process_groups(distributed_setup):
     _destroy_model_parallel()
 
 
-def test_build_train_step_and_clip(expert_and_reference_process_groups, distributed_setup):
+def test_build_train_step_and_clip(expert_model_parallel, distributed_setup):
     """Shard experts over expert-DP and clip their combined gradients."""
-    pg_collection, reference_pg_collection = expert_and_reference_process_groups
+    pg_collection, reference_pg_collection = expert_model_parallel
     world_size = distributed_setup.world_size
     # The in-process EP=1 reference needs rank-invariant initialization. GPU expert
     # initialization instead uses the globally configured EP=2 rank in its RNG seed.
